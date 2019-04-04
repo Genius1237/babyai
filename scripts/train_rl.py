@@ -42,6 +42,8 @@ parser.add_argument("--clip-eps", type=float, default=0.2,
                     help="clipping epsilon for PPO (default: 0.2)")
 parser.add_argument("--ppo-epochs", type=int, default=4,
                     help="number of epochs for PPO (default: 4)")
+parser.add_argument("--save-interval", type=int, default=50,
+                    help="number of updates between two saves (default: 50, 0 means no saving)")
 args = parser.parse_args()
 
 utils.seed(args.seed)
@@ -172,6 +174,7 @@ logger.info(acmodel)
 
 total_start_time = time.time()
 best_success_rate = 0
+best_mean_return = 0
 test_env_name = args.env
 while status['num_frames'] < args.frames:
     # Update parameters
@@ -231,8 +234,14 @@ while status['num_frames'] < args.frames:
         agent.model.train()
         mean_return = np.mean(logs["return_per_episode"])
         success_rate = np.mean([1 if r > 0 else 0 for r in logs['return_per_episode']])
+        save_model = False
         if success_rate > best_success_rate:
             best_success_rate = success_rate
+            save_model = True
+        elif (success_rate == best_success_rate) and (mean_return > best_mean_return):
+            best_mean_return = mean_return
+            save_model = True
+        if save_model:
             utils.save_model(acmodel, args.model + '_best')
             obss_preprocessor.vocab.save(utils.get_vocab_path(args.model + '_best'))
             logger.info("Return {: .2f}; best model is saved".format(mean_return))
