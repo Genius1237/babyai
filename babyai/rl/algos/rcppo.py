@@ -23,8 +23,6 @@ class RCParallelEnv(gym.Env):
     def worker(conn, random_seed, good_start_states):
         random.seed(random_seed)
         env = copy.copy(random.choice(good_start_states))
-        start_states_generator = 
-        for i,good_start_states in enumerate()
         while True:
             try:
                 cmd, data = conn.recv()
@@ -42,9 +40,9 @@ class RCParallelEnv(gym.Env):
                     #print(env,env.mission)
                     conn.send(env.count)
                 elif cmd == "update":
+                    good_start_states = data
                     conn.send("done")
                     continue
-                    good_start_states = data
 
                 else:
                     raise NotImplementedError
@@ -104,7 +102,7 @@ class RCParallelEnv(gym.Env):
     def update_good_start_states(self,good_start_states):
         self.good_start_states = good_start_states
         #print(sys.getrefcount(good_start_states),sys.getsizeof(good_start_states))
-        [local.send(("update",None)) for local in self.locals]
+        [local.send(("update",good_start_states)) for local in self.locals]
         [local.recv() for local in self.locals]
 
 class RCPPOAlgo(PPOAlgo):
