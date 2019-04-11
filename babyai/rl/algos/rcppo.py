@@ -47,14 +47,17 @@ def generator(env_name, demo_loc, random_seed):
         
         yield states
 
-def worker(conn, random_seed, env_name, demo_loc, good_start_states):
+def worker(conn, random_seed, env_name, demo_loc):
     #babyai.utils.seed(0)
     random.seed(random_seed)
-    env = copy.deepcopy(random.choice(good_start_states))
     
     start_state_generator = generator(env_name, demo_loc, random_seed)
 
+    i=0
     for good_start_states in start_state_generator:
+        if i==0:
+            i+=1
+            env = copy.deepcopy(random.choice(good_start_states))
         while True:
             try:
                 cmd, data = conn.recv()
@@ -82,10 +85,8 @@ def worker(conn, random_seed, env_name, demo_loc, good_start_states):
 
 class RCParallelEnv(gym.Env):
     """A concurrent execution of environments in multiple processes."""
-
-    good_start_states = []
     
-    def __init__(self, env_name, n_env, good_start_states, demo_loc):
+    def __init__(self, env_name, n_env, demo_loc):
         assert n_env >= 1, "No environment given."
 
         self.env_name = env_name
@@ -93,7 +94,6 @@ class RCParallelEnv(gym.Env):
         temp_env = gym.make(env_name)
         self.observation_space = temp_env.observation_space
         self.action_space = temp_env.action_space
-        self.good_start_states = good_start_states
 
         self.locals = []
         self.processes = []
@@ -101,7 +101,7 @@ class RCParallelEnv(gym.Env):
         for i in range(self.n_env):
             local, remote = Pipe()
             self.locals.append(local)
-            p = Process(target=worker, args=(remote, rand_seed+i, env_name, demo_loc, self.good_start_states))
+            p = Process(target=worker, args=(remote, rand_seed+i, env_name, demo_loc))
             p.daemon = True
             p.start()
             remote.close()
@@ -165,9 +165,8 @@ class RCPPOAlgo(PPOAlgo):
             self.good_start_states = self.read_good_start_states(env_name, demo_loc)
         elif version == "v2" or version == "v3":
             self.read_good_start_states_v2(env_name,demo_loc)
-            self.good_start_states = self.start_states[0]
         self.env = None
-        self.env = RCParallelEnv(self.env_name,self.n_env,self.good_start_states, demo_loc)
+        self.env = RCParallelEnv(self.env_name,self.n_env, demo_loc)
         self.obs = self.env.reset()
         
         self.update = 0
@@ -176,7 +175,7 @@ class RCPPOAlgo(PPOAlgo):
         self.es_max = -1
         self.es_pat = 0
 
-    def early_stopping_check(self, patience):
+    def early_stopping_check(self, patience, min_delta):
         '''
         if len(self.log_history) < patience:
             return False
@@ -197,7 +196,7 @@ class RCPPOAlgo(PPOAlgo):
                     return False
             return True
         '''
-        if self.log_history[-1] > self.es_max:
+        if self.log_history[-1] - self.es_max > min_delta:
             self.es_max = self.log_history[-1]
             self.es_pat = 0
             self.best_weights = self.acmodel.state_dict()
@@ -253,10 +252,10 @@ class RCPPOAlgo(PPOAlgo):
                 self.log_history.append(success_rate)
                 logger = logging.getLogger(__name__)
 
-                min_delta = 0
+                min_delta = 0.025
                 patience = 3
                 if self.curr_update < self.curriculum_length:
-                    if self.early_stopping_check(patience+(self.curr_update**2)):
+                    if self.early_stopping_check(patience+(self.curr_update),min_delta):
                         self.curr_update+=1
                         self.log_history = []
                         self.env.update_good_start_states()
@@ -335,6 +334,9 @@ class RCPPOAlgo(PPOAlgo):
 
         seed = 0
         max_len = max([len(demo[3]) for demo in demos]) -1
+        self.curriculum_length = max_len
+        self.pos = 0
+        return
         self.start_states = [[] for _ in range(max_len)]
 
         for i,demo in enumerate(demos):
@@ -355,8 +357,6 @@ class RCPPOAlgo(PPOAlgo):
                 env.step_count = 0
                 self.start_states[n_steps-j-1].append(copy.deepcopy(env))
 
-        self.curriculum_length = max_len
-        self.pos = 0
 
     def update_good_start_states_v2(self):
         self.pos += 1
