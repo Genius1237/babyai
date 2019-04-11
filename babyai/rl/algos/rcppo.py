@@ -256,7 +256,7 @@ class RCPPOAlgo(PPOAlgo):
                 min_delta = 0
                 patience = 3
                 if self.curr_update < self.curriculum_length:
-                    if self.early_stopping_check(patience+(2**(self.curr_update))):
+                    if self.early_stopping_check(patience+(self.curr_update**2)):
                         self.curr_update+=1
                         self.log_history = []
                         self.env.update_good_start_states()
