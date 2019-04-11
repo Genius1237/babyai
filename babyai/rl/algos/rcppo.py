@@ -14,42 +14,78 @@ import gc
 
 import traceback
 import sys
+import os
+import itertools
 
-class RCParallelEnv(gym.Env):
-    """A concurrent execution of environments in multiple processes."""
+def generator(env_name, demo_loc, random_seed):
+    demos = babyai.utils.demos.load_demos(demo_loc)
 
-    good_start_states = []
-    @staticmethod
-    def worker(conn, random_seed, good_start_states):
-        random.seed(random_seed)
-        env = copy.copy(random.choice(good_start_states))
+    seed = 0
+    max_len = max([len(demo[3]) for demo in demos]) -1
+    envs = []
+    for i in range(len(demos)):
+        env = gym.make(env_name)
+        env.seed(seed+i)
+        env.reset()
+        envs.append(env)
+
+    for ll in range(max_len):
+        states = []
+        for i,demo in enumerate(demos):
+            actions = demo[3]
+            
+            env = copy.deepcopy(envs[i])
+            
+            n_steps = len(actions) -1
+            
+            for j in range(n_steps-ll):
+                _,_,done,_ = env.step(actions[j].value)
+
+            env.step_count = 0
+            env.count=0
+            states.append(env)
+        
+        yield states
+
+def worker(conn, random_seed, env_name, demo_loc, good_start_states):
+    #babyai.utils.seed(0)
+    random.seed(random_seed)
+    env = copy.deepcopy(random.choice(good_start_states))
+    
+    start_state_generator = generator(env_name, demo_loc, random_seed)
+
+    for good_start_states in start_state_generator:
         while True:
             try:
                 cmd, data = conn.recv()
                 if cmd == "step":
                     obs, reward, done, info = env.step(data)
                     if done:
-                        env = copy.copy(random.choice(good_start_states))
+                        env = copy.deepcopy(random.choice(good_start_states))
                         obs = env.gen_obs()
                     conn.send((obs, reward, done, info))
                 elif cmd == "reset":
-                    env = copy.copy(random.choice(good_start_states))
+                    env = copy.deepcopy(random.choice(good_start_states))
                     obs = env.gen_obs()
                     conn.send(obs)
                 elif cmd == "print":
                     #print(env,env.mission)
                     conn.send(env.count)
                 elif cmd == "update":
-                    good_start_states = data
                     conn.send("done")
-                    continue
-
+                    break
                 else:
                     raise NotImplementedError
             except:
                 traceback.print_exc()
 
-    def __init__(self, env_name, n_env, good_start_states):
+
+class RCParallelEnv(gym.Env):
+    """A concurrent execution of environments in multiple processes."""
+
+    good_start_states = []
+    
+    def __init__(self, env_name, n_env, good_start_states, demo_loc):
         assert n_env >= 1, "No environment given."
 
         self.env_name = env_name
@@ -65,7 +101,7 @@ class RCParallelEnv(gym.Env):
         for i in range(self.n_env):
             local, remote = Pipe()
             self.locals.append(local)
-            p = Process(target=RCParallelEnv.worker, args=(remote, rand_seed+i, self.good_start_states))
+            p = Process(target=worker, args=(remote, rand_seed+i, env_name, demo_loc, self.good_start_states))
             p.daemon = True
             p.start()
             remote.close()
@@ -99,10 +135,9 @@ class RCParallelEnv(gym.Env):
         for p in self.processes:
             p.terminate()
 
-    def update_good_start_states(self,good_start_states):
-        self.good_start_states = good_start_states
+    def update_good_start_states(self):
         #print(sys.getrefcount(good_start_states),sys.getsizeof(good_start_states))
-        [local.send(("update",good_start_states)) for local in self.locals]
+        [local.send(("update",None)) for local in self.locals]
         [local.recv() for local in self.locals]
 
 class RCPPOAlgo(PPOAlgo):
@@ -132,24 +167,57 @@ class RCPPOAlgo(PPOAlgo):
             self.read_good_start_states_v2(env_name,demo_loc)
             self.good_start_states = self.start_states[0]
         self.env = None
-        self.env = RCParallelEnv(self.env_name,self.n_env,self.good_start_states)
+        self.env = RCParallelEnv(self.env_name,self.n_env,self.good_start_states, demo_loc)
         self.obs = self.env.reset()
         
         self.update = 0
         self.curr_update = 1
         self.log_history = []
+        self.es_max = -1
+        self.es_pat = 0
 
-    def early_stopping_check(self,min_delta, patience):
+    def early_stopping_check(self, patience):
+        '''
         if len(self.log_history) < patience:
             return False
-
         else:
             for i in range(patience-1):
                 if self.log_history[-1-i]-self.log_history[-2-i] >= min_delta:
                     return False
             return True
+        '''
+        '''
+        if len(self.log_history) ==0 :
+            return False
+        else:
+            for i in range(patience):
+                if self.log_history[-1-i] >= 0.9:
+                    continue
+                else:
+                    return False
+            return True
+        '''
+        if self.log_history[-1] > self.es_max:
+            self.es_max = self.log_history[-1]
+            self.es_pat = 0
+            self.best_weights = self.acmodel.state_dict()
+            ans = False
+            no = 0
+        else:
+            self.es_pat += 1
+            if self.es_pat >= patience:
+                self.es_max = -1
+                self.es_pat = 0
+                self.acmodel.load_state_dict(self.best_weights)
+                ans = True
+                no = 1
+            else:
+                ans = False
+                no = 1
+        #print(ans,no,self.es_pat,patience)
+        return ans
 
-    def update_parameters(self):
+    def update_parameters(self):            
         logs = super().update_parameters()
         '''logs = {
             "entropy":0,"value":0,"policy_loss":0,"value_loss":0,"grad_norm":0,"loss":0,"return_per_episode": [0],"reshaped_return_per_episode": [0],"num_frames_per_episode": [0],"num_frames": 0,"episodes_done": 0
@@ -160,21 +228,22 @@ class RCPPOAlgo(PPOAlgo):
         if self.version == "v1":
             if self.update % self.update_frequency == 0 and self.update//self.update_frequency < 15:
                 self.good_start_states = self.update_good_start_states(self.good_start_states,self.random_walk_length,self.transfer_ratio)
-                self.env.update_good_start_states(self.good_start_states)
+                self.env.update_good_start_states()
                 for state in self.good_start_states[-3:]:
                     s1 = copy.copy(state)
                     s1.render()
                     input()
 
         elif self.version == "v2":
+            logger = logging.getLogger(__name__)
             if self.update % self.update_frequency ==0 and self.update//self.update_frequency < self.curriculum_length:
                 
                 """self.env.print()
                 print(sum([state.count for state in self.env.good_start_states])/len(self.env.good_start_states))"""
-                self.env.update_good_start_states(self.update_good_start_states_v2())
+                self.env.update_good_start_states()
+                logger.info('Start state Update Number {}/{}'.format(self.update//self.update_frequency,self.curriculum_length))
 
             if self.update % self.update_frequency ==0 and self.update//self.update_frequency == self.curriculum_length:
-                logger = logging.getLogger(__name__)
                 logger.info('Start State Updates Done')
                 self.env = ParallelEnv([gym.make(self.env_name) for _ in range(self.n_env)])
         
@@ -185,14 +254,14 @@ class RCPPOAlgo(PPOAlgo):
                 logger = logging.getLogger(__name__)
 
                 min_delta = 0
-                patience = 2
+                patience = 3
                 if self.curr_update < self.curriculum_length:
-                    if self.early_stopping_check(min_delta,patience):
+                    if self.early_stopping_check(patience+(2**(self.curr_update))):
                         self.curr_update+=1
                         self.log_history = []
-                        self.env.update_good_start_states(self.update_good_start_states_v2())
+                        self.env.update_good_start_states()
                         logger.info('Start state Update Number {}/{}'.format(self.curr_update,self.curriculum_length))
-
+                
                 elif self.curr_update == self.curriculum_length:
                     self.curr_update += 1
                     logger.info('Start State Updates Done')
@@ -262,7 +331,7 @@ class RCPPOAlgo(PPOAlgo):
         return start_states[:500]
 
     def read_good_start_states_v2(self, env_name, demo_loc):
-        demos = babyai.utils.demos.load_demos(demo_loc)[:500]
+        demos = babyai.utils.demos.load_demos(demo_loc)
 
         seed = 0
         max_len = max([len(demo[3]) for demo in demos]) -1
