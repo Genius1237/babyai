@@ -175,7 +175,7 @@ class RCPPOAlgo(PPOAlgo):
         self.es_max = -1
         self.es_pat = 0
 
-    def early_stopping_check(self, patience, min_delta, threshold=0.7):
+    def early_stopping_check(self, upper_bound):
         '''
         if len(self.log_history) < patience:
             return False
@@ -196,6 +196,11 @@ class RCPPOAlgo(PPOAlgo):
                     return False
             return True
         '''
+        if self.log_history[-1] >= upper_bound:
+            return True
+        else:
+            return False
+        '''
         if self.log_history[-1] - self.es_max > min_delta:
             self.es_max = self.log_history[-1]
             self.es_pat = 0
@@ -204,7 +209,7 @@ class RCPPOAlgo(PPOAlgo):
             no = 0
         else:
             self.es_pat += 1
-            if self.es_pat >= patience and self.log_history[-1] > threshold:
+            if self.es_pat >= patience:
                 self.es_max = -1
                 self.es_pat = 0
                 self.acmodel.load_state_dict(self.best_weights)
@@ -215,7 +220,7 @@ class RCPPOAlgo(PPOAlgo):
                 no = 1
         #print(ans,no,self.es_pat,patience)
         return ans
-
+        '''
     def update_parameters(self):            
         logs = super().update_parameters()
         '''logs = {
@@ -253,9 +258,10 @@ class RCPPOAlgo(PPOAlgo):
                 logger = logging.getLogger(__name__)
 
                 min_delta = 0.025
-                patience = 3
+                patience = 1
                 if self.curr_update < self.curriculum_length:
-                    if self.early_stopping_check(patience+(self.curr_update),min_delta):
+                    #if self.early_stopping_check(patience+(self.curr_update),min_delta):
+                    if self.early_stopping_check(0.7+(self.curr_update/self.curriculum_length)*(0.99-0.7)):    
                         self.curr_update+=1
                         self.log_history = []
                         self.env.update_good_start_states()
