@@ -175,7 +175,7 @@ class RCPPOAlgo(PPOAlgo):
         self.es_max = -1
         self.es_pat = 0
 
-    def early_stopping_check(self, patience, min_delta):
+    def early_stopping_check(self, patience, min_delta, threshold=0.7):
         '''
         if len(self.log_history) < patience:
             return False
@@ -204,7 +204,7 @@ class RCPPOAlgo(PPOAlgo):
             no = 0
         else:
             self.es_pat += 1
-            if self.es_pat >= patience:
+            if self.es_pat >= patience and self.log_history[-1] > threshold:
                 self.es_max = -1
                 self.es_pat = 0
                 self.acmodel.load_state_dict(self.best_weights)
