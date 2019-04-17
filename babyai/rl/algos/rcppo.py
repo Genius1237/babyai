@@ -17,7 +17,7 @@ import sys
 import os
 import itertools
 
-def generator(env_name, demo_loc, random_seed):
+def generator(env_name, demo_loc):
     demos = babyai.utils.demos.load_demos(demo_loc)
 
     seed = 0
@@ -51,10 +51,12 @@ def worker(conn, random_seed, env_name, demo_loc):
     #babyai.utils.seed(0)
     random.seed(random_seed)
     
-    start_state_generator = generator(env_name, demo_loc, random_seed)
+    start_state_generator = generator(env_name, demo_loc)
 
     i=0
+    #good_start_states = []
     for good_start_states in start_state_generator:
+        #good_start_states.extend(good_start_states_u)
         if i==0:
             i+=1
             env = copy.deepcopy(random.choice(good_start_states))
@@ -145,7 +147,7 @@ class RCPPOAlgo(PPOAlgo):
     The class containing an application of Reverse Curriculum learning from
     https://arxiv.org/pdf/1707.05300.pdf to Proximal Policy Optimization
     """
-    def __init__(self, env_name, n_env, acmodel, demo_loc, version, update_frequency = 10, transfer_ratio=0.15, random_walk_length=1, num_frames_per_proc=None, discount=0.99, lr=7e-4, beta1=0.9, beta2=0.999,
+    def __init__(self, env_name, n_env, acmodel, demo_loc, version, es_method=2, update_frequency = 10, transfer_ratio=0.15, random_walk_length=1, num_frames_per_proc=None, discount=0.99, lr=7e-4, beta1=0.9, beta2=0.999,
                  gae_lambda=0.95,
                  entropy_coef=0.01, value_loss_coef=0.5, max_grad_norm=0.5, recurrence=4,
                  adam_eps=1e-5, clip_eps=0.2, epochs=4, batch_size=256, preprocess_obss=None,
@@ -157,6 +159,7 @@ class RCPPOAlgo(PPOAlgo):
         self.random_walk_length = random_walk_length
         self.version = version
         self.update_frequency = update_frequency
+        self.es_method = es_method
         super().__init__([gym.make(env_name) for _ in range(n_env)], acmodel, num_frames_per_proc, discount, lr, beta1, beta2, gae_lambda, entropy_coef,
                          value_loss_coef, max_grad_norm, recurrence, adam_eps, clip_eps, epochs,
                          batch_size, preprocess_obss, reshape_reward, aux_info)
@@ -175,7 +178,7 @@ class RCPPOAlgo(PPOAlgo):
         self.es_max = -1
         self.es_pat = 0
 
-    def early_stopping_check(self, upper_bound):
+    def early_stopping_check(self, method, bound):
         '''
         if len(self.log_history) < patience:
             return False
@@ -196,7 +199,7 @@ class RCPPOAlgo(PPOAlgo):
                     return False
             return True
         '''
-        if self.log_history[-1] >= upper_bound:
+        if self.log_history[-1] >= bound:
             return True
         else:
             return False
@@ -261,7 +264,11 @@ class RCPPOAlgo(PPOAlgo):
                 patience = 1
                 if self.curr_update < self.curriculum_length:
                     #if self.early_stopping_check(patience+(self.curr_update),min_delta):
-                    if self.early_stopping_check(0.7+(self.curr_update/self.curriculum_length)*(0.99-0.7)):    
+                    if self.es_method == 1:
+                        bound = 0.95
+                    elif self.es_method ==2:
+                        bound = 0.7+(self.curr_update/self.curriculum_length)*(0.99-0.7)
+                    if self.early_stopping_check(self.es_method,bound):    
                         self.curr_update+=1
                         self.log_history = []
                         self.env.update_good_start_states()

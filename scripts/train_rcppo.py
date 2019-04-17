@@ -42,7 +42,7 @@ parser.add_argument("--clip-eps", type=float, default=0.2,
                     help="clipping epsilon for PPO (default: 0.2)")
 parser.add_argument("--ppo-epochs", type=int, default=4,
                     help="number of epochs for PPO (default: 4)")
-parser.add_argument("--save-interval", type=int, default=50,
+parser.add_argument("--save-interval", type=int, default=0,
                     help="number of updates between two saves (default: 50, 0 means no saving)")
 parser.add_argument("--rc-transfer-ratio", type=float, default=0.15,
                     help='percent of old states to retain for Reverse Curriculum PPO')
@@ -52,6 +52,8 @@ parser.add_argument("--version", type=str, default="v2",
                     help='version of implementation of Reverse Curriculum PPO')
 parser.add_argument("--update-frequency", type=int, default=10,
                     help='frequency of updation of start states for Reverse Curriculum PPO')
+parser.add_argument("--es-method", type=int, default=2,
+                    help='method of early stopping to use')
 args = parser.parse_args()
 
 utils.seed(args.seed)
@@ -112,7 +114,7 @@ and finds a set of states close to the goal state
 
 reshape_reward = lambda _0, _1, reward, _2: args.reward_scale * reward
 if args.algo == "rcppo":
-    algo = babyai.rl.RCPPOAlgo(args.env, args.procs, acmodel, "demos/{}_agent.pkl".format(args.env), args.version, args.update_frequency, args.rc_transfer_ratio, args.random_walk_length, args.frames_per_proc, args.discount, args.lr, args.beta1, args.beta2,
+    algo = babyai.rl.RCPPOAlgo(args.env, args.procs, acmodel, "demos/{}_agent.pkl".format(args.env), args.version, args.es_method, args.update_frequency, args.rc_transfer_ratio, args.random_walk_length, args.frames_per_proc, args.discount, args.lr, args.beta1, args.beta2,
                              args.gae_lambda,
                              args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
                              args.optim_eps, args.clip_eps, args.ppo_epochs, args.batch_size, obss_preprocessor,
