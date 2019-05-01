@@ -42,16 +42,12 @@ parser.add_argument("--clip-eps", type=float, default=0.2,
                     help="clipping epsilon for PPO (default: 0.2)")
 parser.add_argument("--ppo-epochs", type=int, default=4,
                     help="number of epochs for PPO (default: 4)")
-parser.add_argument("--save-interval", type=int, default=50,
-                    help="number of updates between two saves (default: 50, 0 means no saving)")
-parser.add_argument("--rc-transfer-ratio", type=float, default=0.15,
-                    help='percent of old states to retain for Reverse Curriculum PPO')
-parser.add_argument("--random-walk-length", type=int, default=2,
-                    help='no of states to explore from each state for Reverse Curriculum PPO') 
-parser.add_argument("--version", type=str, default="v2",
-                    help='version of implementation of Reverse Curriculum PPO')
+parser.add_argument("--save-interval", type=int, default=0,
+                    help="number of updates between two saves (default: 50, 0 means no saving)") 
 parser.add_argument("--update-frequency", type=int, default=10,
                     help='frequency of updation of start states for Reverse Curriculum PPO')
+parser.add_argument("--curr-method", type=str, default='tc-online',
+                    help='method of building curriculum')
 args = parser.parse_args()
 
 utils.seed(args.seed)
@@ -72,7 +68,8 @@ model_name_parts = {
     'seed': args.seed,
     'info': '',
     'coef': '',
-    'suffix': suffix}
+    'suffix': suffix,
+    'curr_method':args.curr_method}
 default_model_name = "{env}_{algo}_{arch}_{instr}_{mem}_seed{seed}{info}{coef}_{suffix}".format(**model_name_parts)
 if args.pretrained_model:
     default_model_name = args.pretrained_model + '_pretrained_' + default_model_name
@@ -112,7 +109,7 @@ and finds a set of states close to the goal state
 
 reshape_reward = lambda _0, _1, reward, _2: args.reward_scale * reward
 if args.algo == "rcppo":
-    algo = babyai.rl.RCPPOAlgo(args.env, args.procs, acmodel, "demos/{}_agent.pkl".format(args.env), args.version, args.update_frequency, args.rc_transfer_ratio, args.random_walk_length, args.frames_per_proc, args.discount, args.lr, args.beta1, args.beta2,
+    algo = babyai.rl.RCPPOAlgo(args.env, args.procs, acmodel, "demos/{}_agent.pkl".format(args.env), args.update_frequency, args.curr_method, args.frames_per_proc, args.discount, args.lr, args.beta1, args.beta2,
                              args.gae_lambda,
                              args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
                              args.optim_eps, args.clip_eps, args.ppo_epochs, args.batch_size, obss_preprocessor,
