@@ -32,7 +32,14 @@ def generator(env_name, demo_loc, curr_method):
 
     states = []
     curr_done = False
+    prob = 0
     for ll in range(max_len):
+        if curr_method == 'log':
+            prob += 2**ll
+        else:   
+            prob = int(curr_method)*len(demos)
+        prob = min(prob,max_len)
+
         if ll == max_len - 1:
             curr_done=True
 
@@ -45,21 +52,21 @@ def generator(env_name, demo_loc, curr_method):
             
             for j in range(n_steps-ll):
                 _,_,done,_ = env.step(actions[j].value)
-
+            if random.randint(1,prob) == 1:
+                states.append(env)
             env.step_count = 0
             env.count=0
-            states.append(env)
         
-        if curr_method == 'one':
-            yield states,curr_done
-            states = []
-        elif curr_method == 'four':
-            if ll%4 == 3 or curr_done:
-                yield states,curr_done
-                states = []
-        elif curr_method == 'log':
+        if curr_method == 'log':
             if math.log2(ll+2) == int(math.log2(ll+2)) or curr_done:
                 yield states,curr_done
+                states = []
+        else:
+            num = int(curr_method)
+            if ll%num == num-1 or curr_done:
+                yield states,curr_done
+                states = []
+        
 
 def worker(conn, random_seed, env_name, demo_loc, curr_method):
     #babyai.utils.seed(0)
@@ -189,7 +196,7 @@ class RCPPOAlgo(PPOAlgo):
         if version == "v1":
             self.good_start_states = self.read_good_start_states(env_name, demo_loc)
         elif version == "v2" or version == "v3":
-            self.read_good_start_states_v2(env_name,demo_loc)
+            self.read_good_start_states_v2(env_name,demo_loc,curr_method)
         self.env = None
         self.env = RCParallelEnv(self.env_name,self.n_env, demo_loc, curr_method)
         self.obs = self.env.reset()
@@ -287,7 +294,7 @@ class RCPPOAlgo(PPOAlgo):
                 min_delta = 0.025
                 patience = 1
                 if self.es_method == 1:
-                    bound = 0.95
+                    bound = 0.9
                 elif self.es_method == 2:
                     bound = 0.7+(self.curr_update/self.curriculum_length)*(0.99-0.7)
 
@@ -371,14 +378,20 @@ class RCPPOAlgo(PPOAlgo):
 
         return start_states[:500]
 
-    def read_good_start_states_v2(self, env_name, demo_loc):
+    def read_good_start_states_v2(self, env_name, demo_loc,curr_method):
         demos = babyai.utils.demos.load_demos(demo_loc)
 
         seed = 0
         max_len = max([len(demo[3]) for demo in demos]) -1
-        self.curriculum_length = max_len
         self.pos = 0
+        if curr_method == 'log':
+            self.curriculum_length = math.floor(math.log2(max_len)) + 1
+        else:
+            combining_factor = int(curr_method)
+            self.curriculum_length = math.ceil(max_len/combining_factor)
+
         return
+        
         self.start_states = [[] for _ in range(max_len)]
 
         for i,demo in enumerate(demos):

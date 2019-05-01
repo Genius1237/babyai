@@ -76,8 +76,10 @@ model_name_parts = {
     'seed': args.seed,
     'info': '',
     'coef': '',
-    'suffix': suffix}
-default_model_name = "{env}_{algo}_{arch}_{instr}_{mem}_seed{seed}{info}{coef}_{suffix}".format(**model_name_parts)
+    'suffix': suffix,
+    'es_method':args.es_method,
+    'curr_method':args.curr_method}
+default_model_name = "{env}_{algo}_{arch}_{instr}_{mem}_{es_method}_{curr_method}_seed{seed}{info}{coef}_{suffix}".format(**model_name_parts)
 if args.pretrained_model:
     default_model_name = args.pretrained_model + '_pretrained_' + default_model_name
 args.model = args.model.format(**model_name_parts) if args.model else default_model_name
