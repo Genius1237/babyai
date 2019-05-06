@@ -14,33 +14,39 @@ import gc
 
 import traceback
 import sys
+import math
+import os
+import pickle
 
 class RCParallelEnv(gym.Env):
     """A concurrent execution of environments in multiple processes."""
 
-    good_start_states = []
     @staticmethod
-    def worker(conn, random_seed, good_start_states):
+    def worker(conn, random_seed, curriculum_loc):
+        good_start_states = pickle.load(open('{}_0.pickle'.format(curriculum_loc),'rb'))
         random.seed(random_seed)
-        env = copy.copy(random.choice(good_start_states))
+        env = copy.deepcopy(random.choice(good_start_states))
+        curr_no = 0
         while True:
             try:
                 cmd, data = conn.recv()
                 if cmd == "step":
                     obs, reward, done, info = env.step(data)
                     if done:
-                        env = copy.copy(random.choice(good_start_states))
+                        env = copy.deepcopy(random.choice(good_start_states))
                         obs = env.gen_obs()
                     conn.send((obs, reward, done, info))
                 elif cmd == "reset":
-                    env = copy.copy(random.choice(good_start_states))
+                    env = copy.deepcopy(random.choice(good_start_states))
                     obs = env.gen_obs()
                     conn.send(obs)
                 elif cmd == "print":
                     #print(env,env.mission)
                     conn.send(env.count)
                 elif cmd == "update":
-                    good_start_states = data
+                    if data != curr_no:
+                        good_start_states = pickle.load(open('{}_{}.pickle'.format(curriculum_loc,data),'rb'))
+                        curr_no = data
                     conn.send("done")
                     continue
 
@@ -49,7 +55,7 @@ class RCParallelEnv(gym.Env):
             except:
                 traceback.print_exc()
 
-    def __init__(self, env_name, n_env, good_start_states):
+    def __init__(self, env_name, n_env, curriculum_loc):
         assert n_env >= 1, "No environment given."
 
         self.env_name = env_name
@@ -57,7 +63,7 @@ class RCParallelEnv(gym.Env):
         temp_env = gym.make(env_name)
         self.observation_space = temp_env.observation_space
         self.action_space = temp_env.action_space
-        self.good_start_states = good_start_states
+        self.curriculum_loc = curriculum_loc
 
         self.locals = []
         self.processes = []
@@ -65,7 +71,7 @@ class RCParallelEnv(gym.Env):
         for i in range(self.n_env):
             local, remote = Pipe()
             self.locals.append(local)
-            p = Process(target=RCParallelEnv.worker, args=(remote, rand_seed+i, self.good_start_states))
+            p = Process(target=RCParallelEnv.worker, args=(remote, rand_seed+i, curriculum_loc))
             p.daemon = True
             p.start()
             remote.close()
@@ -99,55 +105,63 @@ class RCParallelEnv(gym.Env):
         for p in self.processes:
             p.terminate()
 
-    def update_good_start_states(self,good_start_states):
-        self.good_start_states = good_start_states
+    def update_good_start_states(self,curr_no):
         #print(sys.getrefcount(good_start_states),sys.getsizeof(good_start_states))
-        [local.send(("update",good_start_states)) for local in self.locals]
+        
+        [local.send(("update",curr_no)) for i,local in enumerate(self.locals)]
         [local.recv() for local in self.locals]
+
+def smooth(array, smoothing_weight):
+    result = []
+    prev = array[0]
+    for x in array:
+        curr = prev * smoothing_weight + (1-smoothing_weight)*x
+        result.append(curr)
+        prev = curr
+    return result[-1]
 
 class RCPPOAlgo(PPOAlgo):
     """
     The class containing an application of Reverse Curriculum learning from
     https://arxiv.org/pdf/1707.05300.pdf to Proximal Policy Optimization
     """
-    def __init__(self, env_name, n_env, acmodel, demo_loc, version, update_frequency = 10, transfer_ratio=0.15, random_walk_length=1, num_frames_per_proc=None, discount=0.99, lr=7e-4, beta1=0.9, beta2=0.999,
-                 gae_lambda=0.95,
-                 entropy_coef=0.01, value_loss_coef=0.5, max_grad_norm=0.5, recurrence=4,
+    def __init__(self, env_name, n_env, acmodel, demo_loc, update_frequency = 10, curr_method='1', curr_n_demos=500, tsc_method = 1,
+                 tsc_alpha = 0.1, tsc_epsilon = 0.1, num_frames_per_proc=None, discount=0.99, lr=7e-4, beta1=0.9, beta2=0.999,
+                 gae_lambda=0.95, entropy_coef=0.01, value_loss_coef=0.5, max_grad_norm=0.5, recurrence=4,
                  adam_eps=1e-5, clip_eps=0.2, epochs=4, batch_size=256, preprocess_obss=None,
                  reshape_reward=None, aux_info=None):
 
         self.n_env = n_env
         self.env_name = env_name
-        self.transfer_ratio = transfer_ratio
-        self.random_walk_length = random_walk_length
-        self.version = version
+        self.transfer_ratio = 0.15
+        self.tsc_alpha = tsc_alpha
+        self.tsc_epsilon = tsc_epsilon
+        self.tsc_method = tsc_method
+        self.curr_n_demos = curr_n_demos
+        self.curr_method = curr_method
         self.update_frequency = update_frequency
         super().__init__([gym.make(env_name) for _ in range(n_env)], acmodel, num_frames_per_proc, discount, lr, beta1, beta2, gae_lambda, entropy_coef,
                          value_loss_coef, max_grad_norm, recurrence, adam_eps, clip_eps, epochs,
                          batch_size, preprocess_obss, reshape_reward, aux_info)
-
-        if version == "v1":
-            self.good_start_states = self.read_good_start_states(env_name, demo_loc)
-        elif version == "v2" or version == "v3":
-            self.read_good_start_states_v2(env_name,demo_loc)
-            self.good_start_states = self.start_states[0]
         self.env = None
-        self.env = RCParallelEnv(self.env_name,self.n_env,self.good_start_states)
+
+        self.read_good_start_states(env_name,demo_loc,self.curr_n_demos,self.curr_method)
+        
+        self.env = RCParallelEnv(self.env_name,self.n_env,self.curriculum_loc)
         self.obs = self.env.reset()
         
         self.update = 0
         self.curr_update = 1
+        
+        self.curr_q = [0 for _ in range(self.curriculum_length)]
+        if self.tsc_method == 1:
+            self.curr_prev_reward = [0 for _ in range(self.curriculum_length)]
+        elif self.tsc_method == 2:
+            self.success_history = []
+
         self.log_history = []
+        self.curr_done = False
 
-    def early_stopping_check(self,min_delta, patience):
-        if len(self.log_history) < patience:
-            return False
-
-        else:
-            for i in range(patience-1):
-                if self.log_history[-1-i]-self.log_history[-2-i] >= min_delta:
-                    return False
-            return True
 
     def update_parameters(self):
         logs = super().update_parameters()
@@ -155,118 +169,69 @@ class RCPPOAlgo(PPOAlgo):
             "entropy":0,"value":0,"policy_loss":0,"value_loss":0,"grad_norm":0,"loss":0,"return_per_episode": [0],"reshaped_return_per_episode": [0],"num_frames_per_episode": [0],"num_frames": 0,"episodes_done": 0
         }'''
         
+        success_rate = np.mean([1 if r > 0 else 0 for r in logs['return_per_episode']])
+        if self.tsc_method == 2:
+            self.success_history.append(success_rate)
         self.update += 1
         
-        if self.version == "v1":
-            if self.update % self.update_frequency == 0 and self.update//self.update_frequency < 15:
-                self.good_start_states = self.update_good_start_states(self.good_start_states,self.random_walk_length,self.transfer_ratio)
-                self.env.update_good_start_states(self.good_start_states)
-                for state in self.good_start_states[-3:]:
-                    s1 = copy.copy(state)
-                    s1.render()
-                    input()
+        if not self.curr_done and self.update % self.update_frequency == 0:
+            #reward = np.mean([r for r in logs['return_per_episode']])
+            self.log_history.append(success_rate)
+            logger = logging.getLogger(__name__)
 
-        elif self.version == "v2":
-            if self.update % self.update_frequency ==0 and self.update//self.update_frequency < self.curriculum_length:
+            if len(self.log_history)>=10 and smooth(self.log_history[-10:],0.8)>=0.9:
+                self.curr_done = True
+                logger.info('Curriculum Updates Done')
+                self.env = ParallelEnv([gym.make(self.env_name) for _ in range(self.n_env)])
+            else:
+                if self.tsc_method == 1:
+                    r = success_rate - self.curr_prev_reward[self.curr_chosen]
+                    self.curr_prev_reward[self.curr_chosen] = success_rate
                 
-                """self.env.print()
-                print(sum([state.count for state in self.env.good_start_states])/len(self.env.good_start_states))"""
-                self.env.update_good_start_states(self.update_good_start_states_v2())
+                elif self.tsc_method == 2:
+                    r = np.polyfit([_ for _ in range(len(self.success_history))],self.success_history,1)[0]
+                    self.success_history = []
 
-            if self.update % self.update_frequency ==0 and self.update//self.update_frequency == self.curriculum_length:
-                logger = logging.getLogger(__name__)
+                self.curr_q[self.curr_chosen] = self.tsc_alpha * r + (1-self.tsc_alpha)*self.curr_q[self.curr_chosen]
+                
+                # epsilon-greedy sampling
+                p = random.random()
+                if p > self.tsc_epsilon:
+                    argmax = np.argmax(self.curr_q)
+                    self.curr_chosen = argmax
+                else:
+                    self.curr_chosen = random.randint(0,self.curriculum_length-1)
+                
+                logger.info('Changing to curriculum {}'.format(self.curr_chosen))
+                self.env.update_good_start_states(self.curr_chosen)
+            
+            #logger.info('Start state Update Number {}/{}'.format(self.curr_update,self.curriculum_length-1))
+            
+            '''
+            if self.curr_update < self.curriculum_length:
+                if True:
+                #if self.early_stopping_check(min_delta,patience):
+                    
+                    self.env.update_good_start_states(self.curr_update)
+                    self.curr_update+=1
+                    logger.info('Start state Update Number {}/{}'.format(self.curr_update,self.curriculum_length-1))
+
+            elif self.curr_update == self.curriculum_length:
+                self.curr_update += 1
                 logger.info('Start State Updates Done')
                 self.env = ParallelEnv([gym.make(self.env_name) for _ in range(self.n_env)])
-        
-        elif self.version == "v3":
-            if self.update % self.update_frequency == 0:
-                success_rate = np.mean([1 if r > 0 else 0 for r in logs['return_per_episode']])
-                self.log_history.append(success_rate)
-                logger = logging.getLogger(__name__)
-
-                min_delta = 0
-                patience = 2
-                if self.curr_update < self.curriculum_length:
-                    if self.early_stopping_check(min_delta,patience):
-                        self.curr_update+=1
-                        self.log_history = []
-                        self.env.update_good_start_states(self.update_good_start_states_v2())
-                        logger.info('Start state Update Number {}/{}'.format(self.curr_update,self.curriculum_length))
-
-                elif self.curr_update == self.curriculum_length:
-                    self.curr_update += 1
-                    logger.info('Start State Updates Done')
-                    self.env = ParallelEnv([gym.make(self.env_name) for _ in range(self.n_env)])
-
-
-        #self.obs = self.env.reset()
-
+            '''
         return logs
+   
+    def read_good_start_states(self, env_name, demo_loc,curr_n_demos,curr_method):
+        curr_method = int(curr_method)
+        demos = babyai.utils.demos.load_demos(demo_loc)[:curr_n_demos]
         
-    def update_good_start_states(self, good_start_states, random_walk_length, transfer_ratio):
-        new_starts = []
-        #new_starts.extend(copy.deepcopy(self.good_start_states))
-        
-        #"""
-        for state in good_start_states:
-            s1 = state
-            for i in range(random_walk_length):
-                s1 = copy.deepcopy(s1)
-                action = s1.action_space.sample()
-                s1.step(action)
-                s1.count += 1
-                s1.step_count = 0
-            new_starts.append(s1)
-
-        """
-        #n_threads = self.n_env
-        n_threads = 64
-        for start in range(0,len(self.good_start_states),n_threads):
-            end = min(start+n_threads,len(self.good_start_states))
-            
-            good_start_states = ParallelEnv(self.good_start_states[start:end])
-            for i in range(n_explore):
-                action = [good_start_states.action_space.sample() for _ in range(len(good_start_states.envs))]
-                good_start_states.step(action)
-                new_starts.extend(copy.deepcopy(good_start_states.envs))
-        """
-
-        n_old = int(transfer_ratio*len(good_start_states))
-        l = len(good_start_states)
-        good_start_states = random.sample(good_start_states,n_old)
-        good_start_states.extend(random.sample(new_starts,l-n_old))
-        
-        return good_start_states
-
-    def read_good_start_states(self,env_name,demo_loc):
-        demos = babyai.utils.demos.load_demos(demo_loc)
-
-        seed = 0
-        start_states = []
-        
-        for i,demo in enumerate(demos):
-            actions = demo[3]
-
-            env = gym.make(env_name)
-            
-            babyai.utils.seed(seed)
-            
-            env.seed(seed+i)
-            env.reset()
-            for j in range(len(actions)-1):
-                _,_,done,_ = env.step(actions[j].value)
-            env.step_count = 0
-            env.count = 1
-            start_states.append(env)
-
-        return start_states[:500]
-
-    def read_good_start_states_v2(self, env_name, demo_loc):
-        demos = babyai.utils.demos.load_demos(demo_loc)[:500]
-
         seed = 0
         max_len = max([len(demo[3]) for demo in demos]) -1
-        self.start_states = [[] for _ in range(max_len)]
+        n_stages = math.ceil((max_len+1)/curr_method)
+
+        start_states = [[] for _ in range(n_stages)]
 
         for i,demo in enumerate(demos):
             actions = demo[3]
@@ -277,25 +242,26 @@ class RCPPOAlgo(PPOAlgo):
             env.count = len(actions)
             
             n_steps = len(actions) -1
-            for j in range(max_len-1,n_steps-1,-1):
-                self.start_states[j].append(copy.deepcopy(env))
+            #0 0 .... 0 (max_len-n_steps) 0 to n_steps -1 (n_steps)
 
-            for j in range(n_steps):
+            for j in range(max_len-1,n_steps-1,-1):
+                if random.randint(1,curr_method) == 1:
+                    start_states[math.floor(j/curr_method)].append(copy.deepcopy(env))
+
+            for j in range(n_steps-1,-1,-1):
                 _,_,done,_ = env.step(actions[j].value)
                 env.count -= 1
                 env.step_count = 0
-                self.start_states[n_steps-j-1].append(copy.deepcopy(env))
+                if random.randint(1,curr_method) == 1:
+                    start_states[math.floor(j/curr_method)].append(copy.deepcopy(env))
 
-        self.curriculum_length = max_len
-        self.pos = 0
+        save_dir = os.environ['SLURM_TMPDIR'] if 'SLURM_TMPDIR' in os.environ else '/tmp'
 
-    def update_good_start_states_v2(self):
-        self.pos += 1
-        new_starts = self.start_states[self.pos]
+        self.curriculum_loc = os.path.join(save_dir,str(int(time.time())))
 
-        l = len(self.good_start_states)
-        n_old = int(self.transfer_ratio*l)
-        good_start_states = random.sample(self.good_start_states,n_old)
-        good_start_states.extend(random.sample(new_starts,l-n_old))
-
-        return good_start_states
+        for i in range(len(start_states)):
+            save_loc = '{}_{}.pickle'.format(os.path.join(save_dir,self.curriculum_loc),i)
+            pickle.dump(start_states[i],open(save_loc,'wb'))
+        
+        self.curriculum_length = n_stages
+        self.curr_chosen = 0

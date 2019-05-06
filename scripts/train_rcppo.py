@@ -46,8 +46,16 @@ parser.add_argument("--save-interval", type=int, default=0,
                     help="number of updates between two saves (default: 50, 0 means no saving)") 
 parser.add_argument("--update-frequency", type=int, default=10,
                     help='frequency of updation of start states for Reverse Curriculum PPO')
-parser.add_argument("--curr-method", type=str, default='tc-online',
+parser.add_argument("--curr-n-demos", type=int, default=500,
+                    help='number of demos to use for building curriculum')
+parser.add_argument("--curr-method", type=str, default='1',
                     help='method of building curriculum')
+parser.add_argument("--tsc-method", type=int, default=1,
+                    help='method of finding reward for ts curriculum learning, 1 = online, 2 = naive')
+parser.add_argument("--tsc-alpha", type=float, default=0.6,
+                    help='alpha for teacher-student CL')
+parser.add_argument("--tsc-epsilon", type=float, default=0.1,
+                    help='epsilon for e-greedy sampling teacher-student CL')                                        
 args = parser.parse_args()
 
 utils.seed(args.seed)
@@ -69,8 +77,10 @@ model_name_parts = {
     'info': '',
     'coef': '',
     'suffix': suffix,
-    'curr_method':args.curr_method}
-default_model_name = "{env}_{algo}_{arch}_{instr}_{mem}_seed{seed}{info}{coef}_{suffix}".format(**model_name_parts)
+    'curr_method':args.curr_method,
+    'curr_n_demos':args.curr_n_demos,
+    'tsc_method':args.tsc_method}
+default_model_name = "{env}_{algo}_{arch}_{instr}_{mem}_{curr_n_demos}_{curr_method}_{tsc_method}_seed{seed}{info}{coef}_{suffix}".format(**model_name_parts)
 if args.pretrained_model:
     default_model_name = args.pretrained_model + '_pretrained_' + default_model_name
 args.model = args.model.format(**model_name_parts) if args.model else default_model_name
@@ -109,11 +119,12 @@ and finds a set of states close to the goal state
 
 reshape_reward = lambda _0, _1, reward, _2: args.reward_scale * reward
 if args.algo == "rcppo":
-    algo = babyai.rl.RCPPOAlgo(args.env, args.procs, acmodel, "demos/{}_agent.pkl".format(args.env), args.update_frequency, args.curr_method, args.frames_per_proc, args.discount, args.lr, args.beta1, args.beta2,
-                             args.gae_lambda,
-                             args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
-                             args.optim_eps, args.clip_eps, args.ppo_epochs, args.batch_size, obss_preprocessor,
-                             reshape_reward)
+    algo = babyai.rl.RCPPOAlgo(args.env, args.procs, acmodel, "demos/{}_agent.pkl".format(args.env), args.update_frequency,
+                                args.curr_method, args.curr_n_demos, args.tsc_method, args.tsc_alpha, args.tsc_epsilon, 
+                                args.frames_per_proc, args.discount, args.lr, args.beta1, args.beta2,
+                                args.gae_lambda, args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence, 
+                                args.optim_eps, args.clip_eps, args.ppo_epochs, args.batch_size, obss_preprocessor,
+                                reshape_reward)
 else:
     raise ValueError("Incorrect algorithm name: {}".format(args.algo))
 
