@@ -57,3 +57,4 @@ class ParallelEnv(gym.Env):
     def __del__(self):
         for p in self.processes:
             p.terminate()
+            p.join()

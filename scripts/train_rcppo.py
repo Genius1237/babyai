@@ -26,7 +26,7 @@ from babyai.utils.agent import ModelAgent
 
 # Parse arguments
 parser = ArgumentParser()
-parser.add_argument("--algo", default='ppo',
+parser.add_argument("--algo", default='rcppo',
                     help="algorithm to use (default: ppo)")
 parser.add_argument("--discount", type=float, default=0.99,
                     help="discount factor (default: 0.99)")
@@ -42,18 +42,26 @@ parser.add_argument("--clip-eps", type=float, default=0.2,
                     help="clipping epsilon for PPO (default: 0.2)")
 parser.add_argument("--ppo-epochs", type=int, default=4,
                     help="number of epochs for PPO (default: 4)")
-parser.add_argument("--save-interval", type=int, default=50,
+parser.add_argument("--save-interval", type=int, default=0,
                     help="number of updates between two saves (default: 50, 0 means no saving)")
+parser.add_argument("--rc-transfer-ratio", type=float, default=0.15,
+                    help='percent of old states to retain for Reverse Curriculum PPO')
+parser.add_argument("--random-walk-length", type=int, default=2,
+                    help='no of states to explore from each state for Reverse Curriculum PPO') 
+parser.add_argument("--version", type=str, default="v2",
+                    help='version of implementation of Reverse Curriculum PPO')
+parser.add_argument("--update-frequency", type=int, default=10,
+                    help='frequency of updation of start states for Reverse Curriculum PPO')
+parser.add_argument("--es-method", type=int, default=2,
+                    help='method of early stopping to use')
+parser.add_argument("--curr-method", type=str, default='one',
+                    help='method of building curriculum')                    
 args = parser.parse_args()
 
 utils.seed(args.seed)
 
 # Generate environments
-envs = []
-for i in range(args.procs):
-    env = gym.make(args.env)
-    env.seed(100 * args.seed + i)
-    envs.append(env)
+env = gym.make(args.env)
 
 # Define model name
 suffix = datetime.datetime.now().strftime("%y-%m-%d-%H-%M-%S")
@@ -68,8 +76,10 @@ model_name_parts = {
     'seed': args.seed,
     'info': '',
     'coef': '',
-    'suffix': suffix}
-default_model_name = "{env}_{algo}_{arch}_{instr}_{mem}_seed{seed}{info}{coef}_{suffix}".format(**model_name_parts)
+    'suffix': suffix,
+    'es_method':args.es_method,
+    'curr_method':args.curr_method}
+default_model_name = "{env}_{algo}_{arch}_{instr}_{mem}_{es_method}_{curr_method}_seed{seed}{info}{coef}_{suffix}".format(**model_name_parts)
 if args.pretrained_model:
     default_model_name = args.pretrained_model + '_pretrained_' + default_model_name
 args.model = args.model.format(**model_name_parts) if args.model else default_model_name
@@ -79,9 +89,9 @@ logger = logging.getLogger(__name__)
 
 # Define obss preprocessor
 if 'emb' in args.arch:
-    obss_preprocessor = utils.IntObssPreprocessor(args.model, envs[0].observation_space, args.pretrained_model)
+    obss_preprocessor = utils.IntObssPreprocessor(args.model, env.observation_space, args.pretrained_model)
 else:
-    obss_preprocessor = utils.ObssPreprocessor(args.model, envs[0].observation_space, args.pretrained_model)
+    obss_preprocessor = utils.ObssPreprocessor(args.model, env.observation_space, args.pretrained_model)
 
 # Define actor-critic model
 acmodel = utils.load_model(args.model, raise_not_found=False)
@@ -89,7 +99,7 @@ if acmodel is None:
     if args.pretrained_model:
         acmodel = utils.load_model(args.pretrained_model, raise_not_found=True)
     else:
-        acmodel = ACModel(obss_preprocessor.obs_space, envs[0].action_space,
+        acmodel = ACModel(obss_preprocessor.obs_space, env.action_space,
                           args.image_dim, args.memory_dim, args.instr_dim,
                           not args.no_instr, args.instr_arch, not args.no_mem, args.arch)
 
@@ -99,11 +109,16 @@ utils.save_model(acmodel, args.model)
 if torch.cuda.is_available():
     acmodel.cuda()
 
+"""
+Reads demos at demo_loc, constructs environments, follows trajectories
+and finds a set of states close to the goal state
+"""
+
 # Define actor-critic algo
 
 reshape_reward = lambda _0, _1, reward, _2: args.reward_scale * reward
-if args.algo == "ppo":
-    algo = babyai.rl.PPOAlgo(envs, acmodel, args.frames_per_proc, args.discount, args.lr, args.beta1, args.beta2,
+if args.algo == "rcppo":
+    algo = babyai.rl.RCPPOAlgo(args.env, args.procs, acmodel, "demos/{}_agent.pkl".format(args.env), args.version, args.es_method, args.update_frequency, args.rc_transfer_ratio, args.random_walk_length, args.curr_method, args.frames_per_proc, args.discount, args.lr, args.beta1, args.beta2,
                              args.gae_lambda,
                              args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
                              args.optim_eps, args.clip_eps, args.ppo_epochs, args.batch_size, obss_preprocessor,
@@ -247,3 +262,4 @@ while status['num_frames'] < args.frames:
             logger.info("Return {: .2f}; best model is saved".format(mean_return))
         else:
             logger.info("Return {: .2f}; not the best model; not saved".format(mean_return))
+            
