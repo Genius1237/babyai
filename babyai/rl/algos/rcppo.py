@@ -26,26 +26,38 @@ def generator(env_name, demo_loc, curr_method):
     envs = []
     for i in range(len(demos)):
         env = gym.make(env_name)
-        env.seed(seed+i)
+        env.seed(seed + i)
         env.reset()
         envs.append(env)
 
     states = []
     curr_done = False
     prob = 0
+    prob_sum = 0
+    int_curr_method = int(curr_method) if curr_method != 'log' else None
     for ll in range(max_len):
         if curr_method == 'log':
-            prob += 2**ll
-        else:   
-            prob = int(curr_method)*len(demos)
-        prob = min(prob,max_len)
+            log_var = math.log2(ll + 1)
+            if log_var == int(log_var):
+                prob = 2**(ll + 1)
+                prob_sum += 2**(ll + 1)
+                if prob_sum >= max_len:
+                    prob = max_len - prob_sum + 2**(ll + 1)
+                    prob_sum = max_len
+        else:
+            if ll % int_curr_method == 0:
+                prob = int_curr_method
+                prob_sum += int_curr_method
+                if prob_sum >= max_len:
+                    prob = max_len - prob_sum + int_curr_method
+                    prob_sum = max_len
 
         if ll == max_len - 1:
-            curr_done=True
+            curr_done = True
 
-        for i,demo in enumerate(demos):
+        for i, demo in enumerate(demos):
             actions = demo[3]
-            
+
             env = copy.deepcopy(envs[i])
             obs_history = [env.gen_obs()]
             n_steps = len(actions) -1
@@ -56,16 +68,15 @@ def generator(env_name, demo_loc, curr_method):
             if random.randint(1,prob) == 1:
                 states.append((env, obs_history))
             env.step_count = 0
-            env.count=0
-        
+            env.count = 0
+
         if curr_method == 'log':
-            if math.log2(ll+2) == int(math.log2(ll+2)) or curr_done:
-                yield states,curr_done
+            if math.log2(ll + 2) == int(math.log2(ll + 2)) or curr_done:
+                yield states, curr_done
                 states = []
         else:
-            num = int(curr_method)
-            if ll%num == num-1 or curr_done:
-                yield states,curr_done
+            if ll % int_curr_method == int_curr_method - 1 or curr_done:
+                yield states, curr_done
                 states = []
         
 
@@ -77,7 +88,7 @@ def worker(conn, random_seed, env_name, demo_loc, curr_method):
 
     i=0
     #good_start_states = []
-    for good_start_states,curr_done in start_state_generator:
+    for good_start_states, curr_done in start_state_generator:
         #good_start_states.extend(good_start_states_u)
         if i==0:
             i+=1
