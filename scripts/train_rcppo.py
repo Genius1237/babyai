@@ -48,13 +48,13 @@ parser.add_argument("--rc-transfer-ratio", type=float, default=0.15,
                     help='percent of old states to retain for Reverse Curriculum PPO')
 parser.add_argument("--random-walk-length", type=int, default=2,
                     help='no of states to explore from each state for Reverse Curriculum PPO') 
-parser.add_argument("--version", type=str, default="v2",
+parser.add_argument("--version", type=str, default="v3",
                     help='version of implementation of Reverse Curriculum PPO')
 parser.add_argument("--update-frequency", type=int, default=10,
                     help='frequency of updation of start states for Reverse Curriculum PPO')
 parser.add_argument("--es-method", type=int, default=2,
                     help='method of early stopping to use')
-parser.add_argument("--curr-method", type=str, default='one',
+parser.add_argument("--curr-method", type=str, default='1',
                     help='method of building curriculum')                    
 args = parser.parse_args()
 
