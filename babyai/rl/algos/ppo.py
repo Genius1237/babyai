@@ -86,7 +86,8 @@ class PPOAlgo(BaseAlgo):
 
                     # Compute loss
 
-                    model_results = self.acmodel(sb.obs, memory * sb.mask)
+                    # model_results = self.acmodel(sb.obs, memory * sb.mask)
+                    model_results = self.acmodel(sb.obs, memory)
                     dist = model_results['dist']
                     value = model_results['value']
                     memory = model_results['memory']

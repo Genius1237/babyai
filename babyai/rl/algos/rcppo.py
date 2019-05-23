@@ -47,13 +47,14 @@ def generator(env_name, demo_loc, curr_method):
             actions = demo[3]
             
             env = copy.deepcopy(envs[i])
-            
+            obs_history = [env.gen_obs()]
             n_steps = len(actions) -1
             
             for j in range(n_steps-ll):
-                _,_,done,_ = env.step(actions[j].value)
+                obs,_,done,_ = env.step(actions[j].value)
+                obs_history.append(obs)
             if random.randint(1,prob) == 1:
-                states.append(env)
+                states.append((env, obs_history))
             env.step_count = 0
             env.count=0
         
@@ -80,7 +81,9 @@ def worker(conn, random_seed, env_name, demo_loc, curr_method):
         #good_start_states.extend(good_start_states_u)
         if i==0:
             i+=1
-            env = copy.deepcopy(random.choice(good_start_states))
+            e = random.choice(good_start_states)
+            env = copy.deepcopy(e[0])
+            history = e[1]
         else:
             if curr_done:
                 conn.send("curr_done")
@@ -92,13 +95,18 @@ def worker(conn, random_seed, env_name, demo_loc, curr_method):
                 if cmd == "step":
                     obs, reward, done, info = env.step(data)
                     if done:
-                        env = copy.deepcopy(random.choice(good_start_states))
+                        e = random.choice(good_start_states)
+                        env = copy.deepcopy(e[0])
+                        history = e[1]
                         obs = env.gen_obs()
+                        info["history"] = history
                     conn.send((obs, reward, done, info))
                 elif cmd == "reset":
-                    env = copy.deepcopy(random.choice(good_start_states))
+                    e = random.choice(good_start_states)
+                    env = copy.deepcopy(e[0])
+                    history = e[1]
                     obs = env.gen_obs()
-                    conn.send(obs)
+                    conn.send((obs, history))
                 elif cmd == "print":
                     #print(env,env.mission)
                     conn.send(env.count)
@@ -140,7 +148,9 @@ class RCParallelEnv(gym.Env):
         #self.envs[0].env = copy.deepcopy(random.choice(RCParallelEnv.good_start_states))
         #results = [self.envs[0].gen_obs()] + [local.recv() for local in self.locals]
         results = [local.recv() for local in self.locals]
-        return results
+        obs = [result[0] for result in results]
+        history = [result[1] for result in results]
+        return obs, history
 
     def step(self, actions):
         for local, action in zip(self.locals, actions):
@@ -197,10 +207,12 @@ class RCPPOAlgo(PPOAlgo):
             self.good_start_states = self.read_good_start_states(env_name, demo_loc)
         elif version == "v2" or version == "v3":
             self.read_good_start_states_v2(env_name,demo_loc,curr_method)
+        
         self.env = None
         self.env = RCParallelEnv(self.env_name,self.n_env, demo_loc, curr_method)
-        self.obs = self.env.reset()
-        
+        self.obs, self.obs_history = self.env.reset()
+        #self.obs = self.env.reset()
+
         self.update = 0
         self.curr_update = 1
         self.log_history = []

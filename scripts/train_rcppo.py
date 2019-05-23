@@ -19,7 +19,7 @@ import babyai
 import babyai.utils as utils
 import babyai.rl
 from babyai.arguments import ArgumentParser
-from babyai.model import ACModel
+from babyai.model import RCModelMemory
 from babyai.evaluate import batch_evaluate
 from babyai.utils.agent import ModelAgent
 
@@ -99,9 +99,9 @@ if acmodel is None:
     if args.pretrained_model:
         acmodel = utils.load_model(args.pretrained_model, raise_not_found=True)
     else:
-        acmodel = ACModel(obss_preprocessor.obs_space, env.action_space,
-                          args.image_dim, args.memory_dim, args.instr_dim,
-                          not args.no_instr, args.instr_arch, not args.no_mem, args.arch)
+        acmodel = RCModelMemory(obss_preprocessor.obs_space, env.action_space,
+                                args.image_dim, args.memory_dim, args.instr_dim,
+                                not args.no_instr, args.instr_arch, not args.no_mem, args.arch)
 
 obss_preprocessor.vocab.save()
 utils.save_model(acmodel, args.model)

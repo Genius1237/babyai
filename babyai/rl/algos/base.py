@@ -133,7 +133,8 @@ class BaseAlgo(ABC):
 
             preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
             with torch.no_grad():
-                model_results = self.acmodel(preprocessed_obs, self.memory * self.mask.unsqueeze(1))
+                # model_results = self.acmodel(preprocessed_obs, self.memory * self.mask.unsqueeze(1))
+                model_results = self.acmodel(preprocessed_obs, self.memory)
                 dist = model_results['dist']
                 value = model_results['value']
                 memory = model_results['memory']
@@ -142,6 +143,7 @@ class BaseAlgo(ABC):
             action = dist.sample()
 
             obs, reward, done, env_info = self.env.step(action.cpu().numpy())
+            obs_history = [info["history"] if "history" in info else None for info in env_info]
             if self.aux_info:
                 env_info = self.aux_info_collector.process(env_info)
                 # env_info = self.process_aux_info(env_info)
@@ -151,13 +153,18 @@ class BaseAlgo(ABC):
             self.obss[i] = self.obs
             self.obs = obs
 
-            self.memories[i] = self.memory
-            self.memory = memory
-
             self.masks[i] = self.mask
             self.mask = 1 - torch.tensor(done, device=self.device, dtype=torch.float)
             self.actions[i] = action
             self.values[i] = value
+            for ind, d in enumerate(done):
+                if d:
+                    history = obs_history[ind]
+                    history = self.preprocess_obss(history, device=self.device)
+                    self.memory[ind] = self.acmodel.obs2memory(history, torch.zeros_like(self.memory[ind]))
+
+            self.memories[i] = self.memory
+            self.memory = memory
             if self.reshape_reward is not None:
                 self.rewards[i] = torch.tensor([
                     self.reshape_reward(obs_, action_, reward_, done_)
@@ -191,7 +198,8 @@ class BaseAlgo(ABC):
 
         preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
         with torch.no_grad():
-            next_value = self.acmodel(preprocessed_obs, self.memory * self.mask.unsqueeze(1))['value']
+            # next_value = self.acmodel(preprocessed_obs, self.memory * self.mask.unsqueeze(1))['value']
+            next_value = self.acmodel(preprocessed_obs, self.memory)['value']
 
         for i in reversed(range(self.num_frames_per_proc)):
             next_mask = self.masks[i+1] if i < self.num_frames_per_proc - 1 else self.mask

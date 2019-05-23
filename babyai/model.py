@@ -296,3 +296,47 @@ class ACModel(nn.Module, babyai.rl.RecurrentACModel):
 
         else:
             ValueError("Undefined instruction architecture: {}".format(self.use_instr))
+
+class RCModelMemory(ACModel):
+    def __init__(self, *args, **kwargs):
+        super(RCModelMemory, self).__init__(*args, **kwargs)
+    
+    def obs2memory(self, obs, memory, instr_embedding=None):
+        #rnn = nn.LSTM(self.image_dim, self.memory_dim)
+
+        if self.use_instr and instr_embedding is None:
+            instr_embedding = self._get_instr_embedding(obs.instr)
+        if self.use_instr and self.lang_model == "attgru":
+            # outputs: B x L x D
+            # memory: B x M
+            mask = (obs.instr != 0).float()
+            instr_embedding = instr_embedding[:, :mask.shape[1]]
+            keys = self.memory2key(memory)
+            pre_softmax = (keys[:, None, :] * instr_embedding).sum(2) + 1000 * mask
+            attention = F.softmax(pre_softmax, dim=1)
+            instr_embedding = (instr_embedding * attention[:, :, None]).sum(1)
+
+        x = torch.transpose(torch.transpose(obs.image, 1, 3), 2, 3)
+
+        if self.arch.startswith("expert_filmcnn"):
+            x = self.image_conv(x)
+            for controler in self.controllers:
+                x = controler(x, instr_embedding)
+            x = F.relu(self.film_pool(x))
+        else:
+            x = self.image_conv(x)
+
+        # (8, 128, 1, 1)
+        x = x.reshape(x.shape[0], -1)
+        # (8, 128)
+        x = x.unsqueeze(1)
+        # (8, 1, 128)
+        # memory is (1, 256)
+        memory = memory.unsqueeze(0)
+        
+        hidden = (memory[:, :self.semi_memory_size], memory[:, self.semi_memory_size:])
+        for i in range(x.shape[0]):
+            hidden = self.memory_rnn(x[i], hidden)
+        memory = torch.cat(hidden, dim=1)
+
+        return memory
