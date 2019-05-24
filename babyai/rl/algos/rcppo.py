@@ -39,10 +39,10 @@ def generator(env_name, demo_loc, curr_method):
         if curr_method == 'log':
             log_var = math.log2(ll + 1)
             if log_var == int(log_var):
-                prob = 2**(ll + 1)
-                prob_sum += 2**(ll + 1)
+                prob = ll + 1
+                prob_sum += prob
                 if prob_sum >= max_len:
-                    prob = max_len - prob_sum + 2**(ll + 1)
+                    prob = max_len - prob_sum + (ll + 1)
                     prob_sum = max_len
         else:
             if ll % int_curr_method == 0:
