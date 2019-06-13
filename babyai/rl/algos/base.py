@@ -136,7 +136,8 @@ class BaseAlgo(ABC):
             with torch.no_grad():
                 if self.__class__.__name__ == 'RCPPOAlgo' and self.curr_memory:
                     if (self.mask == 0).any():
-                        memory_state = self.run_memory(self.mask, self.obs_history, (preprocessed_obs.image.shape[1:], preprocessed_obs.instr.shape[1:]), False)
+                        memory_state = self.run_memory(self.mask, self.obs_history, (preprocessed_obs.image.shape[1:],
+                                                       preprocessed_obs.instr.shape[1:]), False)
                         self.memory = self.mask.unsqueeze(1) * self.memory + (1 - self.mask.unsqueeze(1)) * memory_state
                     model_results = self.acmodel(preprocessed_obs, self.memory)
                 else:
@@ -150,7 +151,8 @@ class BaseAlgo(ABC):
 
             obs, reward, done, env_info = self.env.step(action.cpu().numpy())
             if self.__class__.__name__ == 'RCPPOAlgo' and self.curr_memory:
-                obs_history = [info["history"] if "history" in info and info["history"] is not None else [] for info in env_info]
+                obs_history = [info["history"] if "history" in info and info["history"] is not None else []
+                               for info in env_info]
                 self.obs_histories.append(self.obs_history)
                 self.obs_history = obs_history
 
@@ -223,7 +225,9 @@ class BaseAlgo(ABC):
                     for j in range(self.num_procs)
                     for i in range(self.num_frames_per_proc)]
         if self.__class__.__name__ == 'RCPPOAlgo' and self.curr_memory:
-            exps.obs_history = numpy.array([self.obs_histories[i][j] for j in range(self.num_procs) for i in range(self.num_frames_per_proc)])            
+            exps.obs_history = numpy.array([self.obs_histories[i][j]
+                                            for j in range(self.num_procs)
+                                            for i in range(self.num_frames_per_proc)])
         # In commments below T is self.num_frames_per_proc, P is self.num_procs,
         # D is the dimensionality
 
