@@ -300,9 +300,9 @@ class ACModel(nn.Module, babyai.rl.RecurrentACModel):
 class RCModelMemory(ACModel):
     def __init__(self, *args, **kwargs):
         super(RCModelMemory, self).__init__(*args, **kwargs)
-    
+
     def obs2memory(self, obs, memory, instr_embedding=None):
-        #rnn = nn.LSTM(self.image_dim, self.memory_dim)
+        # rnn = nn.LSTM(self.image_dim, self.memory_dim)
 
         if self.use_instr and instr_embedding is None:
             instr_embedding = self._get_instr_embedding(obs.instr)
@@ -332,7 +332,7 @@ class RCModelMemory(ACModel):
         # memory is (1, 256)
         # print(x.shape)
         # print(memory.shape)
-        
+
         hidden = (memory[:, :self.semi_memory_size], memory[:, self.semi_memory_size:])
         hidden = self.memory_rnn(x, hidden)
         memory = torch.cat(hidden, dim=1)
