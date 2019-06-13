@@ -19,7 +19,7 @@ import babyai
 import babyai.utils as utils
 import babyai.rl
 from babyai.arguments import ArgumentParser
-from babyai.model import RCModelMemory
+from babyai.model import RCModelMemory, ACModel
 from babyai.evaluate import batch_evaluate
 from babyai.utils.agent import ModelAgent
 
@@ -55,7 +55,9 @@ parser.add_argument("--update-frequency", type=int, default=10,
 parser.add_argument("--es-method", type=int, default=2,
                     help='method of early stopping to use')
 parser.add_argument("--curr-method", type=str, default='1',
-                    help='method of building curriculum')                    
+                    help='method of building curriculum')
+parser.add_argument("--curr-memory", action='store_true',
+                    default=False, help='use memory of demos in curriculum')                  
 args = parser.parse_args()
 
 utils.seed(args.seed)
@@ -77,8 +79,8 @@ model_name_parts = {
     'info': '',
     'coef': '',
     'suffix': suffix,
-    'es_method':args.es_method,
-    'curr_method':args.curr_method}
+    'es_method': args.es_method,
+    'curr_method': args.curr_method}
 default_model_name = "{env}_{algo}_{arch}_{instr}_{mem}_{es_method}_{curr_method}_seed{seed}{info}{coef}_{suffix}".format(**model_name_parts)
 if args.pretrained_model:
     default_model_name = args.pretrained_model + '_pretrained_' + default_model_name
@@ -99,9 +101,14 @@ if acmodel is None:
     if args.pretrained_model:
         acmodel = utils.load_model(args.pretrained_model, raise_not_found=True)
     else:
-        acmodel = RCModelMemory(obss_preprocessor.obs_space, env.action_space,
-                                args.image_dim, args.memory_dim, args.instr_dim,
-                                not args.no_instr, args.instr_arch, not args.no_mem, args.arch)
+        if args.curr_memory:
+            acmodel = RCModelMemory(obss_preprocessor.obs_space, env.action_space,
+                                    args.image_dim, args.memory_dim, args.instr_dim,
+                                    not args.no_instr, args.instr_arch, not args.no_mem, args.arch)
+        else:
+            acmodel = ACModel(obss_preprocessor.obs_space, env.action_space,
+                                    args.image_dim, args.memory_dim, args.instr_dim,
+                                    not args.no_instr, args.instr_arch, not args.no_mem, args.arch)
 
 obss_preprocessor.vocab.save()
 utils.save_model(acmodel, args.model)
@@ -118,7 +125,7 @@ and finds a set of states close to the goal state
 
 reshape_reward = lambda _0, _1, reward, _2: args.reward_scale * reward
 if args.algo == "rcppo":
-    algo = babyai.rl.RCPPOAlgo(args.env, args.procs, acmodel, "demos/{}_agent.pkl".format(args.env), args.version, args.es_method, args.update_frequency, args.rc_transfer_ratio, args.random_walk_length, args.curr_method, args.frames_per_proc, args.discount, args.lr, args.beta1, args.beta2,
+    algo = babyai.rl.RCPPOAlgo(args.env, args.procs, acmodel, "demos/{}_agent.pkl".format(args.env), args.version, args.es_method, args.update_frequency, args.rc_transfer_ratio, args.random_walk_length, args.curr_method, args.curr_memory,args.frames_per_proc, args.discount, args.lr, args.beta1, args.beta2,
                              args.gae_lambda,
                              args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
                              args.optim_eps, args.clip_eps, args.ppo_epochs, args.batch_size, obss_preprocessor,

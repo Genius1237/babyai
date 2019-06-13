@@ -329,14 +329,12 @@ class RCModelMemory(ACModel):
         # (8, 128, 1, 1)
         x = x.reshape(x.shape[0], -1)
         # (8, 128)
-        x = x.unsqueeze(1)
-        # (8, 1, 128)
         # memory is (1, 256)
-        memory = memory.unsqueeze(0)
+        # print(x.shape)
+        # print(memory.shape)
         
         hidden = (memory[:, :self.semi_memory_size], memory[:, self.semi_memory_size:])
-        for i in range(x.shape[0]):
-            hidden = self.memory_rnn(x[i], hidden)
+        hidden = self.memory_rnn(x, hidden)
         memory = torch.cat(hidden, dim=1)
 
         return memory

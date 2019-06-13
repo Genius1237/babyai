@@ -86,8 +86,13 @@ class PPOAlgo(BaseAlgo):
 
                     # Compute loss
 
-                    # model_results = self.acmodel(sb.obs, memory * sb.mask)
-                    model_results = self.acmodel(sb.obs, memory)
+                    if self.__class__.__name__ == 'RCPPOAlgo' and self.curr_memory:
+                        if (sb.mask == 0).any():
+                            memory_state = self.run_memory(sb.mask, sb.obs_history, (sb.obs.image.shape[1:], sb.obs.instr.shape[1:]), True)
+                            memory = sb.mask * memory + (1 - sb.mask) * memory_state
+                        model_results = self.acmodel(sb.obs, memory)
+                    else:
+                        model_results = self.acmodel(sb.obs, memory * sb.mask)
                     dist = model_results['dist']
                     value = model_results['value']
                     memory = model_results['memory']

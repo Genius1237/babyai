@@ -6,6 +6,7 @@ import random
 import time
 import logging
 import numpy as np
+from babyai.rl.utils import DictList
 
 from multiprocessing import Process, Pipe
 from multiprocessing.managers import BaseManager
@@ -17,6 +18,7 @@ import sys
 import os
 import itertools
 import math
+import torch
 
 def generator(env_name, demo_loc, curr_method):
     demos = babyai.utils.demos.load_demos(demo_loc)
@@ -197,8 +199,8 @@ class RCPPOAlgo(PPOAlgo):
     The class containing an application of Reverse Curriculum learning from
     https://arxiv.org/pdf/1707.05300.pdf to Proximal Policy Optimization
     """
-    def __init__(self, env_name, n_env, acmodel, demo_loc, version, es_method=2, update_frequency = 10, transfer_ratio=0.15, random_walk_length=1, curr_method = 'one',num_frames_per_proc=None, discount=0.99, lr=7e-4, beta1=0.9, beta2=0.999,
-                 gae_lambda=0.95,
+    def __init__(self, env_name, n_env, acmodel, demo_loc, version, es_method=2, update_frequency = 10, transfer_ratio=0.15, random_walk_length=1, curr_method='one', curr_memory=False,
+                 num_frames_per_proc=None, discount=0.99, lr=7e-4, beta1=0.9, beta2=0.999, gae_lambda=0.95,
                  entropy_coef=0.01, value_loss_coef=0.5, max_grad_norm=0.5, recurrence=4,
                  adam_eps=1e-5, clip_eps=0.2, epochs=4, batch_size=256, preprocess_obss=None,
                  reshape_reward=None, aux_info=None):
@@ -222,7 +224,8 @@ class RCPPOAlgo(PPOAlgo):
         self.env = None
         self.env = RCParallelEnv(self.env_name,self.n_env, demo_loc, curr_method)
         self.obs, self.obs_history = self.env.reset()
-        #self.obs = self.env.reset()
+        self.mask = torch.zeros_like(self.mask, device=self.device)
+        # self.obs = self.env.reset()
 
         self.update = 0
         self.curr_update = 1
@@ -231,6 +234,7 @@ class RCPPOAlgo(PPOAlgo):
         self.es_pat = 0
         self.curr_done = False
         self.curr_really_done = False
+        self.curr_memory = curr_memory
 
     def early_stopping_check(self, method, bound):
         '''
@@ -327,6 +331,8 @@ class RCPPOAlgo(PPOAlgo):
                         self.curr_update+=1
                         self.log_history = []
                         self.curr_done = self.env.update_good_start_states()
+                        self.obs, self.obs_history = self.env.reset()
+                        self.mask = torch.zeros_like(self.mask)
                         logger.info('Start state Update Number {}'.format(self.curr_update))
                 
                 else:
@@ -337,6 +343,7 @@ class RCPPOAlgo(PPOAlgo):
                         
                         self.env = ParallelEnv([gym.make(self.env_name) for _ in range(self.n_env)])
                         self.curr_really_done = True
+                        self.curr_memory = False
 
 
         #self.obs = self.env.reset()
@@ -446,3 +453,35 @@ class RCPPOAlgo(PPOAlgo):
         good_start_states.extend(random.sample(new_starts,l-n_old))
 
         return good_start_states
+
+    def run_memory(self, mask, obs_history, shape, grad_enabled):
+        # print(mask[0], obs_history[0])
+        history_lengths = [len(obs) for obs in obs_history]
+        max_history_lengths = max(history_lengths)
+        history_lengths = [len(h) for h in obs_history]
+        with torch.set_grad_enabled(grad_enabled):
+            # print(obs_history[1])
+            filler = DictList({"image": torch.zeros(0, *shape[0], device=self.device), "instr": torch.zeros(0, *shape[1], device=self.device)})
+            processed_obs = [self.preprocess_obss(history, device=self.device) if len(history) != 0 else filler for history in obs_history]
+            lengths = torch.tensor([obs.image.shape[0] for obs in processed_obs], device=self.device)
+
+            # memory_state = torch.zeros_like(self.memory)
+            memory_state = torch.zeros(mask.shape[0], self.acmodel.memory_dim * 2, device=self.device)
+            non_zero = (mask == 0).nonzero()[0][0]
+            
+            instr_lengths = [obs.instr.shape[1] if obs.instr.shape[0] != 0 else 0 for obs in processed_obs]
+            max_instr_length = max(instr_lengths)
+            argmax_instr_length = np.argmax(instr_lengths)
+            
+            instr = torch.stack([torch.cat([obs.instr[0], torch.zeros(max_instr_length - instr_lengths[i], dtype=torch.long, device=self.device)]) if obs.instr.shape[0] != 0 else torch.zeros_like(processed_obs[argmax_instr_length].instr[0], device=self.device) for i,obs in enumerate(processed_obs)])
+            for _ in range(max_history_lengths):
+                length_mask = (_ < lengths).unsqueeze(1).float()
+                
+                image = torch.stack([obs.image[_] if obs.image.shape[0] > _ else torch.zeros(shape[0], device=self.device) for obs in processed_obs])
+                
+                observations = DictList({"image": image, "instr": instr})
+                memory_state_new = self.acmodel.obs2memory(observations, memory_state)
+                memory_state = length_mask * memory_state_new + (1 - length_mask) * memory_state
+                
+            return memory_state
+            #memory = mask.unsqueeze(1) * self.memory + (1 - mask.unsqueeze(1)) * memory_state

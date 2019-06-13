@@ -128,13 +128,19 @@ class BaseAlgo(ABC):
             reward, policy loss, value loss, etc.
 
         """
+        if self.__class__.__name__ == 'RCPPOAlgo' and self.curr_memory:
+            self.obs_histories = []
         for i in range(self.num_frames_per_proc):
             # Do one agent-environment interaction
-
             preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
             with torch.no_grad():
-                # model_results = self.acmodel(preprocessed_obs, self.memory * self.mask.unsqueeze(1))
-                model_results = self.acmodel(preprocessed_obs, self.memory)
+                if self.__class__.__name__ == 'RCPPOAlgo' and self.curr_memory:
+                    if (self.mask == 0).any():
+                        memory_state = self.run_memory(self.mask, self.obs_history, (preprocessed_obs.image.shape[1:], preprocessed_obs.instr.shape[1:]), False)
+                        self.memory = self.mask.unsqueeze(1) * self.memory + (1 - self.mask.unsqueeze(1)) * memory_state
+                    model_results = self.acmodel(preprocessed_obs, self.memory)
+                else:
+                    model_results = self.acmodel(preprocessed_obs, self.memory * self.mask.unsqueeze(1))
                 dist = model_results['dist']
                 value = model_results['value']
                 memory = model_results['memory']
@@ -143,7 +149,11 @@ class BaseAlgo(ABC):
             action = dist.sample()
 
             obs, reward, done, env_info = self.env.step(action.cpu().numpy())
-            obs_history = [info["history"] if "history" in info else None for info in env_info]
+            if self.__class__.__name__ == 'RCPPOAlgo' and self.curr_memory:
+                obs_history = [info["history"] if "history" in info and info["history"] is not None else [] for info in env_info]
+                self.obs_histories.append(self.obs_history)
+                self.obs_history = obs_history
+
             if self.aux_info:
                 env_info = self.aux_info_collector.process(env_info)
                 # env_info = self.process_aux_info(env_info)
@@ -157,12 +167,6 @@ class BaseAlgo(ABC):
             self.mask = 1 - torch.tensor(done, device=self.device, dtype=torch.float)
             self.actions[i] = action
             self.values[i] = value
-            for ind, d in enumerate(done):
-                if d:
-                    history = obs_history[ind]
-                    history = self.preprocess_obss(history, device=self.device)
-                    self.memory[ind] = self.acmodel.obs2memory(history, torch.zeros_like(self.memory[ind]))
-
             self.memories[i] = self.memory
             self.memory = memory
             if self.reshape_reward is not None:
@@ -198,8 +202,10 @@ class BaseAlgo(ABC):
 
         preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
         with torch.no_grad():
-            # next_value = self.acmodel(preprocessed_obs, self.memory * self.mask.unsqueeze(1))['value']
-            next_value = self.acmodel(preprocessed_obs, self.memory)['value']
+            if self.__class__.__name__ == 'RCPPOAlgo' and self.curr_memory:
+                next_value = self.acmodel(preprocessed_obs, self.memory)['value']
+            else:
+                next_value = self.acmodel(preprocessed_obs, self.memory * self.mask.unsqueeze(1))['value']
 
         for i in reversed(range(self.num_frames_per_proc)):
             next_mask = self.masks[i+1] if i < self.num_frames_per_proc - 1 else self.mask
@@ -216,6 +222,8 @@ class BaseAlgo(ABC):
         exps.obs = [self.obss[i][j]
                     for j in range(self.num_procs)
                     for i in range(self.num_frames_per_proc)]
+        if self.__class__.__name__ == 'RCPPOAlgo' and self.curr_memory:
+            exps.obs_history = numpy.array([self.obs_histories[i][j] for j in range(self.num_procs) for i in range(self.num_frames_per_proc)])            
         # In commments below T is self.num_frames_per_proc, P is self.num_procs,
         # D is the dimensionality
 
