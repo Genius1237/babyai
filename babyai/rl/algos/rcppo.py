@@ -461,8 +461,6 @@ class RCPPOAlgo(PPOAlgo):
         return good_start_states
 
     def run_memory(self, mask, obs_history, shape, grad_enabled):
-        logger = logging.getLogger(__name__)
-        logger.info("Run Memory: {}".format(grad_enabled))
         # print(mask[0], obs_history[0])
         history_lengths = [len(obs) for obs in obs_history]
         max_history_lengths = max(history_lengths)
