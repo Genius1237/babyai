@@ -165,12 +165,13 @@ class BaseAlgo(ABC):
             self.obss[i] = self.obs
             self.obs = obs
 
+            self.memories[i] = self.memory
+            self.memory = memory
+
             self.masks[i] = self.mask
             self.mask = 1 - torch.tensor(done, device=self.device, dtype=torch.float)
             self.actions[i] = action
             self.values[i] = value
-            self.memories[i] = self.memory
-            self.memory = memory
             if self.reshape_reward is not None:
                 self.rewards[i] = torch.tensor([
                     self.reshape_reward(obs_, action_, reward_, done_)

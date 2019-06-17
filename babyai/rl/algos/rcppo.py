@@ -223,9 +223,11 @@ class RCPPOAlgo(PPOAlgo):
 
         self.env = None
         self.env = RCParallelEnv(self.env_name, self.n_env, demo_loc, curr_method)
-        self.obs, self.obs_history = self.env.reset()
-        self.mask = torch.zeros_like(self.mask, device=self.device)
-        # self.obs = self.env.reset()
+        if curr_memory:
+            self.obs, self.obs_history = self.env.reset()
+            self.mask = torch.zeros_like(self.mask, device=self.device)
+        else:
+            self.obs, _ = self.env.reset()
 
         self.update = 0
         self.curr_update = 1
@@ -336,8 +338,9 @@ class RCPPOAlgo(PPOAlgo):
                         self.curr_update += 1
                         self.log_history = []
                         self.curr_done = self.env.update_good_start_states()
-                        self.obs, self.obs_history = self.env.reset()
-                        self.mask = torch.zeros_like(self.mask)
+                        if self.curr_memory:
+                            self.obs, self.obs_history = self.env.reset()
+                            self.mask = torch.zeros_like(self.mask)
                         logger.info('Start state Update Number {}'.format(self.curr_update))
 
                 else:
@@ -458,6 +461,8 @@ class RCPPOAlgo(PPOAlgo):
         return good_start_states
 
     def run_memory(self, mask, obs_history, shape, grad_enabled):
+        logger = logging.getLogger(__name__)
+        logger.info("Run Memory: {}".format(grad_enabled))
         # print(mask[0], obs_history[0])
         history_lengths = [len(obs) for obs in obs_history]
         max_history_lengths = max(history_lengths)
