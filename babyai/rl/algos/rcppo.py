@@ -338,9 +338,9 @@ class RCPPOAlgo(PPOAlgo):
                         self.curr_update += 1
                         self.log_history = []
                         self.curr_done = self.env.update_good_start_states()
-                        if self.curr_memory:
+                        ''' if self.curr_memory:
                             self.obs, self.obs_history = self.env.reset()
-                            self.mask = torch.zeros_like(self.mask)
+                            self.mask = torch.zeros_like(self.mask)'''
                         logger.info('Start state Update Number {}'.format(self.curr_update))
 
                 else:
