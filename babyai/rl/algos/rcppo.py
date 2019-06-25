@@ -182,7 +182,7 @@ class RCPPOAlgo(PPOAlgo):
     https://arxiv.org/pdf/1707.05300.pdf to Proximal Policy Optimization
     """
     def __init__(self, env_name, n_env, acmodel, demo_loc, es_method=2, update_frequency=10,
-                 transfer_ratio=0.15, random_walk_length=1, curr_method='one', curr_memory=False,
+                 transfer_ratio=0.15, curr_method='one', curr_memory=False,
                  num_frames_per_proc=None, discount=0.99, lr=7e-4, beta1=0.9, beta2=0.999, gae_lambda=0.95,
                  entropy_coef=0.01, value_loss_coef=0.5, max_grad_norm=0.5, recurrence=4,
                  adam_eps=1e-5, clip_eps=0.2, epochs=4, batch_size=256, preprocess_obss=None,
@@ -191,7 +191,6 @@ class RCPPOAlgo(PPOAlgo):
         self.n_env = n_env
         self.env_name = env_name
         self.transfer_ratio = transfer_ratio
-        self.random_walk_length = random_walk_length
         self.update_frequency = update_frequency
         self.es_method = es_method
         super().__init__([gym.make(env_name) for _ in range(n_env)], acmodel, num_frames_per_proc, discount, lr, beta1,
