@@ -169,7 +169,7 @@ class RCPPOAlgo(PPOAlgo):
     https://arxiv.org/pdf/1707.05300.pdf to Proximal Policy Optimization
     """
     def __init__(self, env_name, n_env, acmodel, demo_loc, es_method=2, update_frequency=10,
-                 transfer_ratio=0.15, random_walk_length=1, curr_method='one',
+                 transfer_ratio=0.15, curr_method='one',
                  num_frames_per_proc=None, discount=0.99, lr=7e-4, beta1=0.9, beta2=0.999, gae_lambda=0.95,
                  entropy_coef=0.01, value_loss_coef=0.5, max_grad_norm=0.5, recurrence=4,
                  adam_eps=1e-5, clip_eps=0.2, epochs=4, batch_size=256, preprocess_obss=None,
@@ -178,14 +178,13 @@ class RCPPOAlgo(PPOAlgo):
         self.n_env = n_env
         self.env_name = env_name
         self.transfer_ratio = transfer_ratio
-        self.random_walk_length = random_walk_length
         self.update_frequency = update_frequency
         self.es_method = es_method
         super().__init__([gym.make(env_name) for _ in range(n_env)], acmodel, num_frames_per_proc, discount, lr, beta1,
                          beta2, gae_lambda, entropy_coef, value_loss_coef, max_grad_norm, recurrence, adam_eps,
                          clip_eps, epochs, batch_size, preprocess_obss, reshape_reward, aux_info)
 
-        self.read_good_start_states_v2(env_name, demo_loc, curr_method)
+        self.read_good_start_states(env_name, demo_loc, curr_method)
         self.env = None
         self.env = RCParallelEnv(self.env_name, self.n_env, demo_loc, curr_method)
         self.obs = self.env.reset()
@@ -242,7 +241,7 @@ class RCPPOAlgo(PPOAlgo):
 
         return logs
 
-    def read_good_start_states_v2(self, env_name, demo_loc, curr_method):
+    def read_good_start_states(self, env_name, demo_loc, curr_method):
         demos = babyai.utils.demos.load_demos(demo_loc)
 
         seed = 0
