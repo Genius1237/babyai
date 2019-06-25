@@ -48,8 +48,6 @@ parser.add_argument("--rc-transfer-ratio", type=float, default=0.15,
                     help='percent of old states to retain for Reverse Curriculum PPO')
 parser.add_argument("--random-walk-length", type=int, default=2,
                     help='no of states to explore from each state for Reverse Curriculum PPO')
-parser.add_argument("--version", type=str, default="v3",
-                    help='version of implementation of Reverse Curriculum PPO')
 parser.add_argument("--update-frequency", type=int, default=10,
                     help='frequency of updation of start states for Reverse Curriculum PPO')
 parser.add_argument("--es-method", type=int, default=2,
@@ -126,7 +124,7 @@ and finds a set of states close to the goal state
 
 reshape_reward = lambda _0, _1, reward, _2: args.reward_scale * reward
 if args.algo == "rcppo":
-    algo = babyai.rl.RCPPOAlgo(args.env, args.procs, acmodel, "demos/{}_agent.pkl".format(args.env), args.version,
+    algo = babyai.rl.RCPPOAlgo(args.env, args.procs, acmodel, "demos/{}_agent.pkl".format(args.env),
                                args.es_method, args.update_frequency, args.rc_transfer_ratio, args.random_walk_length,
                                args.curr_method, args.curr_memory, args.frames_per_proc, args.discount, args.lr,
                                args.beta1, args.beta2, args.gae_lambda, args.entropy_coef, args.value_loss_coef,
